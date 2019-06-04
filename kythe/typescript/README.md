@@ -75,6 +75,10 @@ describing the module.
 
 **Form**: `$DECLARATION_NAME`
 
+**Notes**: Every named declaration is guaranteed to have a signature of the form
+`$SCOPE[.$SCOPE]*` where `$SCOPE` is the name of each encompassing named
+declaration.
+
 **SyntaxKind**:
 
 -   `NamespaceImport`
@@ -107,8 +111,9 @@ export class Klass {
 #### Class Declaration
 
 **Form**:
-- `$CLASS#type`
-- `$CLASS:ctor`
+
+-   `$CLASS#type`
+-   `$CLASS:ctor`
 
 **Notes**: Because a class is both a type and a value, it has to be labeled as
 such. The identifier of a class is always binded as the class type. If a class
@@ -119,8 +124,9 @@ This only applies to the class declarations. Signatures of identifiers within a
 class have a class component that is only `$CLASS`.
 
 **SyntaxKind**:
-- ClassDeclaration
-- Constructor
+
+-   ClassDeclaration
+-   Constructor
 
 ```typescript
 //- @Klass defines/binding VName("Klass#type", _, _, _, _)
@@ -151,7 +157,7 @@ class Klass {
 
 #### Setter
 
-**Form**: `$DECLARATION_NAME#setter`
+**Form**: `$DECLARATION_NAME:setter`
 
 **SyntaxKind**:
 
