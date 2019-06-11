@@ -27,7 +27,6 @@ import * as assert from 'assert';
 import * as child_process from 'child_process';
 import * as path from 'path';
 import * as ts from 'typescript';
-
 import * as indexer from './indexer';
 
 const KYTHE_PATH = process.env['KYTHE'] || '/opt/kythe';
@@ -96,14 +95,17 @@ function verify(
 }
 
 function testLoadTsConfig() {
-  const config =
-      indexer.loadTsConfig('testdata/tsconfig-files.json', 'testdata');
+  const config = indexer.loadTsConfig(
+      'kythe/typescript/testdata/tsconfig-files.json',
+      'kythe/typescript/testdata');
   // We expect the paths that were loaded to be absolute.
-  assert.deepEqual(config.fileNames, [path.resolve('testdata/alt.ts')]);
+  assert.deepEqual(
+      config.fileNames, [path.resolve('kythe/typescript/testdata/alt.ts')]);
 }
 
 async function testIndexer(args: string[], plugins?: indexer.Plugin[]) {
-  const config = indexer.loadTsConfig('testdata/tsconfig.json', 'testdata');
+  const config = indexer.loadTsConfig(
+      'kythe/typescript/testdata/tsconfig.json', 'kythe/typescript/testdata');
   let testPaths = args.map(arg => path.resolve(arg));
   if (args.length === 0) {
     // If no tests were passed on the command line, run all the .ts files found
@@ -113,17 +115,11 @@ async function testIndexer(args: string[], plugins?: indexer.Plugin[]) {
 
   const host = createTestCompilerHost(config.options);
   for (const test of testPaths) {
-    const testName = path.relative(config.options.rootDir!, test);
-    const start = new Date().valueOf();
-    process.stdout.write(`${testName}: `);
     try {
       await verify(host, config.options, test, plugins);
     } catch (e) {
-      console.log('FAIL');
       throw e;
     }
-    const time = new Date().valueOf() - start;
-    console.log('PASS', time + 'ms');
   }
   return 0;
 }
@@ -153,20 +149,21 @@ async function testPlugin() {
       }
     },
   };
-  return testIndexer(['testdata/plugin.ts'], [plugin]);
+  return testIndexer(['kythe/typescript/testdata/plugin.ts'], [plugin]);
 }
 
-async function testMain(args: string[]) {
-  testLoadTsConfig();
-  await testIndexer(args);
-  await testPlugin();
-}
+describe('loadTsConfig', () => {
+  it('should load tsconfig', () => {
+    testLoadTsConfig();
+  });
+});
 
-testMain(process.argv.slice(2))
-    .then(() => {
-      process.exitCode = 0;
-    })
-    .catch((e) => {
-      console.error(e);
-      process.exitCode = 1;
-    });
+describe('indexer', () => {
+  it('should index TypeScript files', async () => {
+    await testIndexer(process.argv.slice(2));
+  });
+
+  it('should support plugins', async () => {
+    await testPlugin();
+  })
+});

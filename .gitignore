@@ -34,3 +34,6 @@ kythe/web/site/_vendor/
 
 # User bazelrc overrides
 /user.bazelrc
+
+# Dependency artifacts
+/node_modules/
