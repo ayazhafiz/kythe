@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::schema::{EdgeKind, Fact, VName};
 use rustc_serialize::base64::{ToBase64, STANDARD};
 use rustc_serialize::json;
-use super::schema::{VName, Fact, EdgeKind};
 
 // EntryWriter implementations define behavior for outputting kythe info.
 pub trait EntryWriter {
@@ -40,7 +40,6 @@ struct Edge<'a> {
     target: &'a VName,
     fact_name: &'a str,
 }
-
 
 impl EntryWriter for JsonEntryWriter {
     fn edge(&self, src: &VName, edge_kind: EdgeKind, target: &VName) {

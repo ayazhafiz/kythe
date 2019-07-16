@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use kythe::writer::EntryWriter;
-use rustc::lint::{LateContext, LintPass, LateLintPass, LintArray};
-use rustc::hir::intravisit::Visitor;
 use rustc::hir;
+use rustc::hir::intravisit::Visitor;
+use rustc::lint::{LateContext, LateLintPass, LintArray, LintPass};
 use syntax::ast;
 use visitor::KytheVisitor;
 
 /// Represents the data that we pass to the KytheVisitor when our LintPass is invoked
 pub struct KytheLintPass {
-    writer: Box<EntryWriter>,
+    writer: Box<dyn EntryWriter>,
 }
 
 impl KytheLintPass {
     /// A convenience constructor
-    pub fn new(writer: Box<EntryWriter>) -> KytheLintPass {
+    pub fn new(writer: Box<dyn EntryWriter>) -> KytheLintPass {
         KytheLintPass { writer: writer }
     }
 }

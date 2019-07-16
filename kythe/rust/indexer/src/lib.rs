@@ -24,7 +24,6 @@ extern crate rustc_serialize;
 extern crate rustc;
 extern crate rustc_plugin;
 
-#[macro_use]
 extern crate log;
 
 mod kythe;
@@ -32,8 +31,8 @@ mod pass;
 mod visitor;
 
 use kythe::writer::JsonEntryWriter;
-use rustc_plugin::Registry;
 use rustc::lint::LateLintPassObject;
+use rustc_plugin::Registry;
 
 // Informs the compiler of the existence and implementation of our plugin.
 #[plugin_registrar]
