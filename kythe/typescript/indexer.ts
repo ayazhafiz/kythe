@@ -710,17 +710,21 @@ function fmtMarkedSource(s: string) {
 function makeMarkedSource({
   kind,
   preText,
+  postChildText,
   postText,
   childList,
 }: {
   kind?: keyof typeof MarkedSource.Kind,
   preText?: string,
+  postChildText?: string,
   postText?: string,
   childList?: MarkedSource[]
 }): MarkedSource {
   const ms = new MarkedSource();
   if (kind !== undefined) ms.setKind(MarkedSource.Kind[kind]);
   if (preText !== undefined) ms.setPreText(fmtMarkedSource(preText));
+  if (postChildText !== undefined)
+    ms.setPostChildText(fmtMarkedSource(postChildText));
   if (postText !== undefined) ms.setPostText(fmtMarkedSource(postText));
   if (childList !== undefined) ms.setChildList(childList);
   return ms;
@@ -729,6 +733,17 @@ function makeMarkedSource({
 function isNonNullableArray<T>(arr: Array<T>): arr is Array<NonNullable<T>> {
   return arr.findIndex(el => el === undefined || el === null) === -1;
 }
+
+function hasParentOf(
+    node: ts.Node, predicate: (node: ts.Node) => boolean): boolean {
+  for (let {parent}: ts.Node = node; parent !== undefined;
+       parent = parent.parent) {
+    if (predicate(parent)) {
+      return true;
+    }
+  }
+  return false;
+};
 
 /**
  * Returns whether the script element kind should be parenthesized when
@@ -747,35 +762,51 @@ function shouldWrapElementKind(kind: ts.ScriptElementKind): boolean {
   }
 }
 
-
 /** Retrieves the declaration context of a node. */
 function getContext(node: ts.Node): string {
   let context: ts.ScriptElementKind;
   if (ts.isVariableDeclaration(node)) {
     if (node.parent.flags & ts.NodeFlags.Let) {
+      // let
       context = ts.ScriptElementKind.letElement;
     } else if (node.parent.flags & ts.NodeFlags.Const) {
+      // const
       context = ts.ScriptElementKind.constElement;
     } else {
-      let isLocal = false;
-      for (let parent: ts.Node = node; parent !== undefined;
-           parent = parent.parent) {
-        if (ts.isFunctionLike(parent) || ts.isCatchClause(parent)) {
-          isLocal = true;
-          break;
-        }
-      }
+      // var/local var
+      const isLocal = hasParentOf(
+          node,
+          parent => ts.isFunctionLike(parent) || ts.isCatchClause(parent));
       context = isLocal ? ts.ScriptElementKind.localVariableElement :
                           ts.ScriptElementKind.variableElement;
     }
   } else if (ts.isPropertyAssignment(node) || ts.isPropertyDeclaration(node)) {
+    // property
     context = ts.ScriptElementKind.memberVariableElement;
+  } else if (ts.isConstructorDeclaration(node)) {
+    // constructor
+    context = ts.ScriptElementKind.constructorImplementationElement;
+  } else if (ts.isMethodDeclaration(node) || ts.isMethodSignature(node)) {
+    // method
+    context = ts.ScriptElementKind.memberFunctionElement;
+  } else if (ts.isGetAccessorDeclaration(node)) {
+    // getter
+    context = ts.ScriptElementKind.memberGetAccessorElement;
+  } else if (ts.isSetAccessorDeclaration(node)) {
+    // setter
+    context = ts.ScriptElementKind.memberSetAccessorElement;
+  } else if (ts.isFunctionDeclaration(node)) {
+    // function/local function
+    const isLocal = hasParentOf(node, ts.isFunctionLike);
+    context = isLocal ? ts.ScriptElementKind.localFunctionElement :
+                        ts.ScriptElementKind.functionElement;
   } else {
     todo(
         node.getSourceFile().fileName, node,
-        `Unknown context for ${node.getText()}`);
+        `Unknown context for kind ${ts.SyntaxKind[node.kind]}`);
     context = ts.ScriptElementKind.unknown;
   }
+
   let displayParts: ts.SymbolDisplayPart[];
   if (shouldWrapElementKind(context)) {
     displayParts = [
@@ -784,9 +815,7 @@ function getContext(node: ts.Node): string {
       {text: ')', kind: 'punctuation'},
     ];
   } else {
-    displayParts = [
-      {text: context, kind: 'text'},
-    ];
+    displayParts = [{text: context, kind: 'text'}];
   }
   return ts.displayPartsToString(displayParts);
 }
@@ -1118,7 +1147,7 @@ class Visitor {
   /**
    * Returns the symbol of a class constructor if it exists, otherwise nothing.
    */
-  getCtorSymbol(klass: ts.ClassDeclaration): ts.Symbol|undefined {
+  getCtorSymbol(klass: ts.ClassLikeDeclaration): ts.Symbol|undefined {
     if (klass.name) {
       const sym = this.host.getSymbolAtLocation(klass.name);
       if (sym && sym.members) {
@@ -1128,7 +1157,8 @@ class Visitor {
     return undefined;
   }
 
-  getSymbolAndVNameForFunctionDeclaration(node: ts.FunctionLikeDeclaration):
+  getSymbolAndVNameForFunctionDeclaration(node: ts.FunctionLikeDeclaration|
+                                          ts.MethodSignature):
       {sym?: ts.Symbol, vname?: VName} {
     let context: Context|undefined = undefined;
     if (ts.isGetAccessor(node)) {
@@ -1682,6 +1712,75 @@ class Visitor {
   }
 
   /**
+   * Emits a code fact for a function-like declaration, specifying how the
+   * declaration should be presented to users.
+   *
+   * The form of the code fact is
+   *     <context> (<parent>.)?<name>: <type>
+   */
+  emitFunctionLikeCode(
+      decl: ts.FunctionLikeDeclaration|ts.MethodSignature, declVName: VName) {
+    let ty: ts.Type;
+    switch (decl.kind) {
+      case ts.SyntaxKind.FunctionDeclaration:
+      case ts.SyntaxKind.MethodDeclaration:
+      case ts.SyntaxKind.MethodSignature:
+      case ts.SyntaxKind.FunctionExpression:
+      case ts.SyntaxKind.ArrowFunction:
+      case ts.SyntaxKind.Constructor:
+        const sig = this.typeChecker.getSignatureFromDeclaration(decl);
+        if (!sig) {
+          todo(this.sourceRoot, decl, `Missing declaration signature`);
+          return;
+        }
+        ty = this.typeChecker.getReturnTypeOfSignature(sig);
+        break;
+      case ts.SyntaxKind.GetAccessor:
+      case ts.SyntaxKind.SetAccessor:
+        ty = this.typeChecker.getTypeAtLocation(decl);
+        break;
+    }
+    const tyStr = this.typeChecker.typeToString(ty);
+    let nameStr;
+    if (decl.kind === ts.SyntaxKind.Constructor) {
+      nameStr = tyStr;
+    } else {
+      const nameSym = decl.name && this.host.getSymbolAtLocation(decl.name);
+      if (!nameSym) {
+        todo(this.sourceRoot, decl, `Missing name or symbol for name`);
+        return;
+      }
+      nameStr = this.typeChecker.symbolToString(nameSym, decl.parent);
+    }
+    const params = decl.typeParameters?.map(t => t.getText()).join(', ');
+    if (params?.length) {
+      nameStr += `<${params}>`;
+    }
+
+    const propertyLike = decl.kind === ts.SyntaxKind.GetAccessor ||
+        decl.kind === ts.SyntaxKind.SetAccessor;
+    const context = getContext(decl);
+
+    const codeParts: MarkedSource[] = [];
+    codeParts.push(makeMarkedSource({kind: 'CONTEXT', preText: context}));
+    codeParts.push(makeMarkedSource({kind: 'BOX', preText: ' '}));
+    codeParts.push(makeMarkedSource({kind: 'IDENTIFIER', preText: nameStr}));
+    if (!propertyLike) {
+      codeParts.push(makeMarkedSource({
+        kind: 'PARAMETER_LOOKUP_BY_PARAM',
+        preText: '(',
+        postChildText: ', ',
+        postText: ')',
+      }));
+    }
+    codeParts.push(
+        makeMarkedSource({kind: 'TYPE', preText: ': ', postText: tyStr}));
+
+    const markedSource = makeMarkedSource({kind: 'BOX', childList: codeParts});
+    this.emitFact(declVName, FactName.CODE, markedSource.serializeBinary());
+  }
+
+  /**
    * Given a path of properties, walks the properties/elements of an
    * object/array literal, yielding the final node along the path.
    *
@@ -1811,7 +1910,8 @@ class Visitor {
     }
   }
 
-  visitFunctionLikeDeclaration(decl: ts.FunctionLikeDeclaration) {
+  visitFunctionLikeDeclaration(decl: ts.FunctionLikeDeclaration|
+                               ts.MethodSignature) {
     this.visitDecorators(decl.decorators || []);
     const {sym, vname} = this.getSymbolAndVNameForFunctionDeclaration(decl);
     if (!vname) {
@@ -1844,6 +1944,7 @@ class Visitor {
       }
 
       this.visitJSDoc(decl, vname);
+      this.emitFunctionLikeCode(decl, vname);
     }
     this.emitEdge(this.newAnchor(decl), EdgeKind.DEFINES, vname);
 
@@ -1879,7 +1980,7 @@ class Visitor {
     }
 
     if (decl.typeParameters) this.visitTypeParameters(decl.typeParameters);
-    if (decl.body) {
+    if ('body' in decl && decl.body) {
       this.visit(decl.body);
     } else {
       this.emitFact(vname, FactName.COMPLETE, 'incomplete');
@@ -2050,6 +2151,8 @@ class Visitor {
         this.emitNode(ctorVName, NodeKind.FUNCTION);
         this.emitSubkind(ctorVName, Subkind.CONSTRUCTOR);
         this.emitEdge(classCtorAnchor, EdgeKind.DEFINES_BINDING, ctorVName);
+        this.emitFunctionLikeCode(
+            ctorDecl as ts.ConstructorDeclaration, ctorVName);
       }
 
       this.visitJSDoc(decl, kClass);
@@ -2206,7 +2309,7 @@ class Visitor {
       case ts.SyntaxKind.GetAccessor:
       case ts.SyntaxKind.SetAccessor:
         return this.visitFunctionLikeDeclaration(
-            node as ts.FunctionLikeDeclaration);
+            node as ts.FunctionLikeDeclaration | ts.MethodSignature);
       case ts.SyntaxKind.ClassDeclaration:
         return this.visitClassDeclaration(node as ts.ClassDeclaration);
       case ts.SyntaxKind.InterfaceDeclaration:
